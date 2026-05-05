@@ -8,6 +8,9 @@ const path = require('path');
 const app = express();
 
 app.use(express.static('static'));
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
+});
 
 app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -25,7 +28,7 @@ const users = [];
 // ============================
 
 app.get('/auth/github', (req, res) => {
-  const redirect_uri = 'http://localhost:5000/auth/github/callback';
+  const redirect_uri = `${process.env.BASE_URL}/auth/github/callback`;
   res.redirect(`https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${redirect_uri}`);
 });
 
@@ -60,7 +63,7 @@ app.get('/auth/github/callback', async (req, res) => {
 // ============================
 
 app.get('/auth/google', (req, res) => {
-  const redirect_uri = 'http://localhost:5000/auth/google/callback';
+  const redirect_uri = `${process.env.BASE_URL}/auth/google/callback`;
 
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${redirect_uri}&response_type=code&scope=profile email`;
 
@@ -75,7 +78,7 @@ app.get('/auth/google/callback', async (req, res) => {
       client_id: process.env.GOOGLE_CLIENT_ID,
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
       code,
-      redirect_uri: 'http://localhost:5000/auth/google/callback',
+      redirect_uri: `${process.env.BASE_URL}/auth/google/callback`,
       grant_type: 'authorization_code'
     });
 
@@ -146,6 +149,6 @@ app.get('/logout', (req, res) => {
   res.redirect('/login.html');
 });
 
-app.listen(process.env.PORT, () => {
+app.listen(process.env.PORT || 5000, () => {
   console.log(`Server running on http://localhost:${process.env.PORT}`);
-});
+});         
