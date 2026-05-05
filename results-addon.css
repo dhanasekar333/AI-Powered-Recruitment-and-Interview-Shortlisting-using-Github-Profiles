@@ -1,0 +1,303 @@
+
+/* ==========================================
+   GitRecruit – Results Panel & Candidate Cards
+   Add this to the END of dashboard.css
+   ========================================== */
+
+/* ── JOB CARD ACTIONS ── */
+.jd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.jd-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.btn-search-candidates {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 14px;
+  background: #0a66c2;
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+.btn-search-candidates:hover  { background: #004182; transform: translateY(-1px); }
+.btn-search-candidates:active { transform: translateY(0); }
+.btn-search-candidates svg {
+  width: 13px; height: 13px;
+  stroke: #fff; fill: none;
+  stroke-width: 2.5; stroke-linecap: round;
+}
+
+/* ── RESULTS OVERLAY ── */
+.results-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+  padding: 20px;
+}
+.results-overlay.open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.results-modal {
+  background: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 760px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  animation: slideUp 0.3s ease;
+  overflow: hidden;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ── RESULTS HEADER ── */
+.results-hdr {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #e8edf2;
+  flex-shrink: 0;
+}
+.results-title    { font-size: 1.15rem; font-weight: 700; color: #1d2226; }
+.results-subtitle { font-size: 0.82rem; color: #5272a0; margin-top: 3px; }
+
+/* ── SUMMARY BAR ── */
+.results-summary-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #e8edf2;
+  flex-shrink: 0;
+}
+.rsb-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 8px;
+  border-right: 1px solid #e8edf2;
+  background: #f8fafc;
+}
+.rsb-item:last-child { border-right: none; }
+.rsb-val   { font-size: 1.4rem; font-weight: 700; color: #0a66c2; }
+.rsb-label { font-size: 0.72rem; color: #5272a0; margin-top: 2px; }
+
+/* ── CANDIDATES LIST ── */
+.candidates-list {
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+
+/* ── CANDIDATE CARD ── */
+.candidate-card {
+  border: 1.5px solid #e2eaf3;
+  border-radius: 12px;
+  padding: 16px;
+  background: #fff;
+  transition: border-color 0.18s, box-shadow 0.18s;
+  border-left: 4px solid var(--rank-color, #3b82f6);
+}
+.candidate-card:hover {
+  border-color: #c8d8ec;
+  box-shadow: 0 4px 16px rgba(10,102,194,0.08);
+}
+
+.cc-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.cc-rank   { font-size: 1.4rem; flex-shrink: 0; }
+.cc-avatar {
+  width: 38px; height: 38px;
+  background: linear-gradient(135deg, #0a66c2, #5272a0);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 1rem; font-weight: 700;
+  flex-shrink: 0;
+}
+.cc-info   { flex: 1; }
+.cc-name   {
+  font-size: 0.95rem; font-weight: 700; color: #1d2226;
+  text-decoration: none;
+}
+.cc-name:hover { color: #0a66c2; text-decoration: underline; }
+.cc-level  { font-size: 0.75rem; font-weight: 600; margin-top: 2px; }
+
+.cc-final-score {
+  text-align: center;
+  background: #f0f6ff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  flex-shrink: 0;
+}
+.cfs-val   { font-size: 1.3rem; font-weight: 800; color: #0a66c2; }
+.cfs-label { font-size: 0.68rem; color: #5272a0; }
+
+.cc-summary {
+  font-size: 0.82rem;
+  color: #4a5568;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.cc-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.skill-chip {
+  background: #e8f0fe;
+  color: #1a56db;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 99px;
+}
+
+/* ── SCORE BARS ── */
+.cc-bars { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.bar-row { display: flex; align-items: center; gap: 8px; }
+.bar-label { font-size: 0.72rem; color: #5272a0; width: 36px; flex-shrink: 0; }
+.bar-track {
+  flex: 1; height: 6px;
+  background: #e8edf2;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.6s ease;
+}
+.bar-fill.match { background: #0a66c2; }
+.bar-fill.code  { background: #22c55e; }
+.bar-fill.cred  { background: #f59e0b; }
+.bar-val { font-size: 0.72rem; font-weight: 600; color: #1d2226; width: 24px; text-align: right; }
+
+/* ── CARD FOOTER ── */
+.cc-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f4f8;
+}
+.cc-meta   { font-size: 0.72rem; color: #5272a0; }
+.cc-gh-link {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0a66c2;
+  text-decoration: none;
+}
+.cc-gh-link:hover { text-decoration: underline; }
+
+/* ── RESULTS FOOTER ── */
+.results-ftr {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #e8edf2;
+  flex-shrink: 0;
+}
+
+/* ── LOADING STATE ── */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+  gap: 20px;
+}
+
+.loading-spinner {
+  width: 48px; height: 48px;
+  border: 4px solid #e8edf2;
+  border-top-color: #0a66c2;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1d2226;
+}
+
+.loading-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.loading-steps .step {
+  font-size: 0.82rem;
+  color: #9aa5b4;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1.5px solid #e8edf2;
+  transition: all 0.4s;
+}
+
+.loading-steps .step.active {
+  color: #0a66c2;
+  background: #f0f6ff;
+  border-color: #0a66c2;
+  font-weight: 600;
+}
+
+/* ── ERROR STATE ── */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+  gap: 16px;
+  text-align: center;
+}
+.error-icon { font-size: 2.5rem; }
+.error-msg  { font-size: 0.9rem; color: #dc2626; max-width: 400px; }
