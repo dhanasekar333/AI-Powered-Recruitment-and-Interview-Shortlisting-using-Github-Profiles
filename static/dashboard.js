@@ -18,23 +18,16 @@ checkAuth();
 // ================= JOB PERSISTENCE (localStorage) =================
 const JOBS_KEY = 'gitrecruit_jobs';
 
-const DEFAULT_JOBS = []; // Start empty — user creates their own
-
 function loadJobs() {
   try {
     const saved = localStorage.getItem(JOBS_KEY);
-    return saved ? JSON.parse(saved) : DEFAULT_JOBS;
-  } catch {
-    return DEFAULT_JOBS;
-  }
+    return saved ? JSON.parse(saved) : [];
+  } catch { return []; }
 }
 
 function saveJobs() {
-  try {
-    localStorage.setItem(JOBS_KEY, JSON.stringify(jobs));
-  } catch (e) {
-    console.warn('Could not save jobs to localStorage:', e);
-  }
+  try { localStorage.setItem(JOBS_KEY, JSON.stringify(jobs)); }
+  catch (e) { console.warn('localStorage write failed:', e); }
 }
 
 // ================= JOB DATA =================
@@ -48,10 +41,10 @@ function renderJobs() {
 
   if (jobs.length === 0) {
     container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">💼</div>
-        <div class="empty-title">No jobs yet</div>
-        <div class="empty-sub">Click "+ New Job" to create your first listing</div>
+      <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:#94a3b8;">
+        <div style="font-size:48px;margin-bottom:12px;">💼</div>
+        <div style="font-size:18px;font-weight:600;color:#64748b;margin-bottom:6px;">No jobs yet</div>
+        <div style="font-size:14px;">Click "+ New Job" to create your first listing</div>
       </div>`;
   } else {
     container.innerHTML = jobs.map((j, i) => `
@@ -84,22 +77,15 @@ function renderJobs() {
 
 renderJobs();
 
-// ================= SEARCH CANDIDATES — proxied through backend =================
+// ================= SEARCH CANDIDATES — async polling =================
 window.searchCandidates = async function(i) {
   const job = jobs[i];
 
-  // Build query from role title
   const queryMap = {
-    'react':   'react developer',
-    'next':    'nextjs developer',
-    'python':  'python developer',
-    'node':    'nodejs developer',
-    'java':    'java developer',
-    'angular': 'angular developer',
-    'vue':     'vue developer',
-    'flutter': 'flutter developer',
-    'golang':  'golang developer',
-    'rust':    'rust developer',
+    'react': 'react developer', 'next': 'nextjs developer',
+    'python': 'python developer', 'node': 'nodejs developer',
+    'java': 'java developer', 'angular': 'angular developer',
+    'vue': 'vue developer', 'flutter': 'flutter developer',
   };
   const roleLower = job.role.toLowerCase();
   let job_query = 'developer';
@@ -107,48 +93,77 @@ window.searchCandidates = async function(i) {
     if (roleLower.includes(key)) { job_query = val; break; }
   }
 
-  // Show loading panel
+  // Show loading panel immediately
   showResultsPanel(job, null, true);
 
   try {
-    // ✅ Calls backend proxy — avoids CORS issues with direct n8n calls
-    const res = await fetch('/api/search-candidates', {
+    // Step 1 — Trigger n8n and get a jobId back instantly
+    const triggerRes = await fetch('/api/search-candidates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        job_query:       job_query,
+        job_query,
         job_description: job.desc,
-        skill:           job.role,
-        location:        'india',
-        limit:           30
+        skill: job.role,
+        location: 'india',
+        limit: 30
       })
     });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `HTTP ${res.status}`);
+    if (!triggerRes.ok) {
+      const err = await triggerRes.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${triggerRes.status}`);
     }
 
-    const raw = await res.json();
+    const { jobId } = await triggerRes.json();
 
-    // Parse n8n output — handles both string and object formats
-    let data = raw;
-    if (raw.output && typeof raw.output === 'string') {
-      try { data = JSON.parse(raw.output); } catch { data = raw; }
-    } else if (raw.output && typeof raw.output === 'object') {
-      data = raw.output;
-    }
+    if (!jobId) throw new Error('Server did not return a jobId');
 
-    // Update job analyzed count and save
-    jobs[i].analyzed = data.top_candidates?.length || 0;
-    saveJobs();
-    renderJobs();
+    // Step 2 — Poll every 15 seconds for up to 20 minutes
+    const MAX_POLLS   = 80;  // 80 × 15s = 20 minutes
+    const POLL_INTERVAL = 15000;
+    let   polls       = 0;
 
-    showResultsPanel(job, data, false);
+    const pollTimer = setInterval(async () => {
+      polls++;
+
+      try {
+        const statusRes  = await fetch(`/api/job-status/${jobId}`);
+        const statusData = await statusRes.json();
+
+        if (statusData.status === 'done') {
+          clearInterval(pollTimer);
+
+          // Parse the result data from n8n
+          let data = statusData.data;
+          if (data && data.output && typeof data.output === 'string') {
+            try { data = JSON.parse(data.output); } catch { /* use as-is */ }
+          } else if (data && data.output && typeof data.output === 'object') {
+            data = data.output;
+          }
+
+          jobs[i].analyzed = data.top_candidates?.length || 0;
+          saveJobs();
+          renderJobs();
+          showResultsPanel(job, data, false);
+
+        } else if (statusData.status === 'error') {
+          clearInterval(pollTimer);
+          showResultsPanel(job, null, false, statusData.error || 'n8n workflow failed');
+
+        } else if (polls >= MAX_POLLS) {
+          clearInterval(pollTimer);
+          showResultsPanel(job, null, false, 'Timed out after 20 minutes. The n8n workflow may still be running — check n8n executions.');
+        }
+        // else still 'pending' — keep polling
+      } catch (pollErr) {
+        console.warn('Poll error:', pollErr);
+      }
+    }, POLL_INTERVAL);
 
   } catch (err) {
     showResultsPanel(job, null, false, err.message);
-    showToast('Failed to fetch candidates: ' + err.message);
+    showToast('Failed to start search: ' + err.message);
   }
 };
 
@@ -174,7 +189,11 @@ function showResultsPanel(job, data, loading, error) {
         <div class="loading-state">
           <div class="loading-spinner"></div>
           <div class="loading-text">AI is analyzing GitHub profiles...</div>
-          <div class="loading-steps">
+          <div style="font-size:13px;color:#64748b;margin-top:8px;text-align:center;">
+            This takes 10–15 minutes. This panel will update automatically when done.<br>
+            You can close this and come back — the search keeps running.
+          </div>
+          <div class="loading-steps" style="margin-top:20px;">
             <div class="step active">🔍 Searching GitHub</div>
             <div class="step">📦 Fetching repositories</div>
             <div class="step">🧠 Running XGBoost analysis</div>
@@ -194,7 +213,10 @@ function showResultsPanel(job, data, loading, error) {
         <div class="error-state">
           <div class="error-icon">⚠️</div>
           <div class="error-msg">${error}</div>
-          <p style="font-size:13px;color:#64748b;margin-top:8px;">Check that your n8n workflow is active and the N8N_WEBHOOK_URL is set in Render.</p>
+          <p style="font-size:13px;color:#64748b;margin-top:8px;">
+            Make sure your n8n workflow is <strong>Active</strong> and 
+            <strong>N8N_WEBHOOK_URL</strong> is set in Render environment variables.
+          </p>
           <button class="btn-ok" onclick="closeResults()">Close</button>
         </div>
       </div>`;
@@ -213,38 +235,20 @@ function showResultsPanel(job, data, loading, error) {
           </div>
           <div class="modal-x" onclick="closeResults()">✕</div>
         </div>
-
         <div class="results-summary-bar">
-          <div class="rsb-item">
-            <span class="rsb-val">${candidates.length}</span>
-            <span class="rsb-label">Shortlisted</span>
-          </div>
-          <div class="rsb-item">
-            <span class="rsb-val">${total}</span>
-            <span class="rsb-label">Evaluated</span>
-          </div>
-          <div class="rsb-item">
-            <span class="rsb-val">${candidates[0]?.final_score?.toFixed(1) || '—'}</span>
-            <span class="rsb-label">Top Score</span>
-          </div>
-          <div class="rsb-item">
-            <span class="rsb-val">${getAvgLevel(candidates)}</span>
-            <span class="rsb-label">Avg Level</span>
-          </div>
+          <div class="rsb-item"><span class="rsb-val">${candidates.length}</span><span class="rsb-label">Shortlisted</span></div>
+          <div class="rsb-item"><span class="rsb-val">${total}</span><span class="rsb-label">Evaluated</span></div>
+          <div class="rsb-item"><span class="rsb-val">${candidates[0]?.final_score?.toFixed(1) || '—'}</span><span class="rsb-label">Top Score</span></div>
+          <div class="rsb-item"><span class="rsb-val">${getAvgLevel(candidates)}</span><span class="rsb-label">Avg Level</span></div>
         </div>
-
         <div class="candidates-list">
           ${candidates.length > 0
             ? candidates.map((c, idx) => renderCandidateCard(c, idx)).join('')
-            : '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No candidates found</div><div class="empty-sub">Try adjusting the job description or role</div></div>'
-          }
+            : '<div style="text-align:center;padding:40px;color:#64748b;">No candidates found. Try adjusting the job description.</div>'}
         </div>
-
         <div class="results-ftr">
           <button class="btn-cancel" onclick="closeResults()">Close</button>
-          <button class="btn-ok" onclick="exportResults(${JSON.stringify(data).replace(/"/g, '&quot;')})">
-            Export Results
-          </button>
+          <button class="btn-ok" onclick="exportResults(${JSON.stringify(data).replace(/"/g, '&quot;')})">Export Results</button>
         </div>
       </div>`;
   }
@@ -258,13 +262,10 @@ function renderCandidateCard(c, idx) {
   const color    = levelColor[c.skill_level] || '#3b82f6';
   const rankEmoji = ['🥇','🥈','🥉','4️⃣','5️⃣'][idx] || `#${c.rank}`;
   const ghUrl    = `https://github.com/${c.candidate}`;
-
   const matchBar = Math.min(100, c.match_score || 0);
   const codeBar  = Math.min(100, c.code_score || 0);
   const credBar  = Math.min(100, c.credibility_score || 0);
-
-  const skills = (c.matched_skills || []).map(s =>
-    `<span class="skill-chip">${s}</span>`).join('');
+  const skills   = (c.matched_skills || []).map(s => `<span class="skill-chip">${s}</span>`).join('');
 
   return `
     <div class="candidate-card" style="--rank-color: ${color}">
@@ -280,29 +281,13 @@ function renderCandidateCard(c, idx) {
           <div class="cfs-label">Score</div>
         </div>
       </div>
-
       <div class="cc-summary">${c.summary || ''}</div>
-
       <div class="cc-skills">${skills}</div>
-
       <div class="cc-bars">
-        <div class="bar-row">
-          <span class="bar-label">Match</span>
-          <div class="bar-track"><div class="bar-fill match" style="width:${matchBar}%"></div></div>
-          <span class="bar-val">${matchBar}</span>
-        </div>
-        <div class="bar-row">
-          <span class="bar-label">Code</span>
-          <div class="bar-track"><div class="bar-fill code" style="width:${codeBar}%"></div></div>
-          <span class="bar-val">${codeBar}</span>
-        </div>
-        <div class="bar-row">
-          <span class="bar-label">Cred</span>
-          <div class="bar-track"><div class="bar-fill cred" style="width:${credBar}%"></div></div>
-          <span class="bar-val">${credBar}</span>
-        </div>
+        <div class="bar-row"><span class="bar-label">Match</span><div class="bar-track"><div class="bar-fill match" style="width:${matchBar}%"></div></div><span class="bar-val">${matchBar}</span></div>
+        <div class="bar-row"><span class="bar-label">Code</span><div class="bar-track"><div class="bar-fill code" style="width:${codeBar}%"></div></div><span class="bar-val">${codeBar}</span></div>
+        <div class="bar-row"><span class="bar-label">Cred</span><div class="bar-track"><div class="bar-fill cred" style="width:${credBar}%"></div></div><span class="bar-val">${credBar}</span></div>
       </div>
-
       <div class="cc-footer">
         <span class="cc-meta">⭐ ${c.active_repo_count} active repos</span>
         <span class="cc-meta">🤖 XGB: ${c.xgb_confidence}% confident</span>
@@ -313,54 +298,45 @@ function renderCandidateCard(c, idx) {
 
 function getAvgLevel(candidates) {
   if (!candidates.length) return '—';
-  const counts = { Advanced: 0, Intermediate: 0, Beginner: 0 };
-  candidates.forEach(c => { if (counts[c.skill_level] !== undefined) counts[c.skill_level]++; });
-  if (counts.Advanced >= counts.Intermediate && counts.Advanced >= counts.Beginner) return 'Advanced';
-  if (counts.Intermediate >= counts.Beginner) return 'Intermediate';
+  const c = { Advanced: 0, Intermediate: 0, Beginner: 0 };
+  candidates.forEach(x => { if (c[x.skill_level] !== undefined) c[x.skill_level]++; });
+  if (c.Advanced >= c.Intermediate && c.Advanced >= c.Beginner) return 'Advanced';
+  if (c.Intermediate >= c.Beginner) return 'Intermediate';
   return 'Beginner';
 }
 
 function animateLoadingSteps() {
   const steps = document.querySelectorAll('.loading-steps .step');
-  let i = 1; // first step already active
+  let i = 1;
   const interval = setInterval(() => {
-    if (i < steps.length) {
-      steps[i].classList.add('active');
-      i++;
-    } else {
-      clearInterval(interval);
-    }
-  }, 8000);
+    if (i < steps.length) { steps[i].classList.add('active'); i++; }
+    else clearInterval(interval);
+  }, 3 * 60 * 1000); // advance a step every 3 minutes
 }
 
 window.closeResults = function() {
   const panel = document.getElementById('resultsPanel');
-  if (panel) {
-    panel.classList.remove('open');
-    setTimeout(() => panel.remove(), 300);
-  }
+  if (panel) { panel.classList.remove('open'); setTimeout(() => panel.remove(), 300); }
 };
 
 window.exportResults = function(data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `candidates-${Date.now()}.json`;
-  a.click();
+  a.href = url; a.download = `candidates-${Date.now()}.json`; a.click();
   URL.revokeObjectURL(url);
   showToast('Results exported!');
 };
 
 // ================= STATS =================
 function updateStats() {
-  const totalAnalyzed = jobs.reduce((s, j) => s + (j.analyzed || 0), 0);
-  $('s-cand').textContent  = totalAnalyzed;
-  $('s-gh').textContent    = totalAnalyzed;
-  $('s-short').textContent = totalAnalyzed > 0 ? Math.min(5, totalAnalyzed) : 0;
+  const total = jobs.reduce((s, j) => s + (j.analyzed || 0), 0);
+  $('s-cand').textContent  = total;
+  $('s-gh').textContent    = total;
+  $('s-short').textContent = total > 0 ? Math.min(5, total) : 0;
 }
 
-// ================= MODAL - VIEW JOB DETAILS =================
+// ================= MODAL =================
 window.openDetail = function(i) {
   currentJobIndex = i;
   const j = jobs[i];
@@ -370,13 +346,10 @@ window.openDetail = function(i) {
   $('modal')?.classList.add('open');
 };
 
-// ================= DELETE =================
 window.deleteJob = function() {
   if (currentJobIndex !== null) {
     jobs.splice(currentJobIndex, 1);
-    saveJobs();
-    renderJobs();
-    currentJobIndex = null;
+    saveJobs(); renderJobs(); currentJobIndex = null;
     $('modal')?.classList.remove('open');
     showToast('Job listing deleted!');
   }
@@ -384,14 +357,11 @@ window.deleteJob = function() {
 
 window.deleteJobFromCard = function(i) {
   if (confirm('Delete this job listing?')) {
-    jobs.splice(i, 1);
-    saveJobs();
-    renderJobs();
+    jobs.splice(i, 1); saveJobs(); renderJobs();
     showToast('Job listing deleted!');
   }
 };
 
-// ================= CREATE JOB =================
 window.openCreateJobModal = function() {
   $('jobRoleInput').value = '';
   $('jobDescInput').value = '';
@@ -416,12 +386,10 @@ window.submitNewJob = function() {
     initials: role.charAt(0).toUpperCase(),
     bg: rc.bg, color: rc.color,
     title: role, role: role, desc: desc,
-    loc: 'Remote', type: 'Full-time',
-    analyzed: 0, skills: []
+    loc: 'Remote', type: 'Full-time', analyzed: 0, skills: []
   });
 
-  saveJobs(); // ✅ Persist to localStorage
-  renderJobs();
+  saveJobs(); renderJobs();
   $('createJobModal')?.classList.remove('open');
   showToast('Job created! Click "Search Candidates" to find matches.');
 };
@@ -429,25 +397,15 @@ window.submitNewJob = function() {
 // ================= MODAL CLOSE =================
 const modal          = $('modal');
 const createJobModal = $('createJobModal');
-
-$('closeModal')?.addEventListener('click', () => { modal?.classList.remove('open'); currentJobIndex = null; });
-$('closeModal2')?.addEventListener('click', () => { modal?.classList.remove('open'); currentJobIndex = null; });
+$('closeModal')?.addEventListener('click',         () => { modal?.classList.remove('open'); currentJobIndex = null; });
+$('closeModal2')?.addEventListener('click',        () => { modal?.classList.remove('open'); currentJobIndex = null; });
 $('closeCreateJobModal')?.addEventListener('click', () => createJobModal?.classList.remove('open'));
-$('cancelCreateJob')?.addEventListener('click',     () => createJobModal?.classList.remove('open'));
-
-modal?.addEventListener('click', e => {
-  if (e.target === modal) { modal.classList.remove('open'); currentJobIndex = null; }
-});
-createJobModal?.addEventListener('click', e => {
-  if (e.target === createJobModal) createJobModal.classList.remove('open');
-});
+$('cancelCreateJob')?.addEventListener('click',    () => createJobModal?.classList.remove('open'));
+modal?.addEventListener('click',         e => { if (e.target === modal)          { modal.classList.remove('open'); currentJobIndex = null; } });
+createJobModal?.addEventListener('click', e => { if (e.target === createJobModal) createJobModal.classList.remove('open'); });
 
 // ================= TOAST =================
-function showToast(message) {
-  const toast = $('toast');
-  if (toast) {
-    toast.textContent = message;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 3000);
-  }
+function showToast(msg) {
+  const t = $('toast');
+  if (t) { t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
 }
