@@ -18,10 +18,35 @@ app.use(session({
   saveUninitialized: true
 }));
 
-app.use(express.json()); // To parse JSON bodies
+app.use(express.json());
 
-// In-memory mock DB for testing email login
+// In-memory mock DB for email login
 const users = [];
+
+// ============================
+// 🔹 N8N PROXY
+// ============================
+
+app.post('/api/search-candidates', async (req, res) => {
+  try {
+    const webhookUrl = process.env.N8N_WEBHOOK_URL;
+    if (!webhookUrl) {
+      return res.status(500).json({ error: 'N8N_WEBHOOK_URL not configured in environment variables.' });
+    }
+
+    const response = await axios.post(webhookUrl, req.body, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 120000 // 2 minutes — n8n pipelines can be slow
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    const message = err.response?.data || err.message;
+    console.error('N8N proxy error:', message);
+    res.status(status).json({ error: String(message) });
+  }
+});
 
 // ============================
 // 🔹 GITHUB AUTH
@@ -34,24 +59,19 @@ app.get('/auth/github', (req, res) => {
 
 app.get('/auth/github/callback', async (req, res) => {
   const code = req.query.code;
-
   try {
     const tokenRes = await axios.post('https://github.com/login/oauth/access_token', {
       client_id: process.env.GITHUB_CLIENT_ID,
       client_secret: process.env.GITHUB_CLIENT_SECRET,
       code
-    }, {
-      headers: { accept: 'application/json' }
-    });
+    }, { headers: { accept: 'application/json' } });
 
     const access_token = tokenRes.data.access_token;
-
     const userRes = await axios.get('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
     req.session.user = userRes.data;
-
     res.redirect('/dashboard.html');
   } catch (err) {
     res.send('GitHub Auth Failed');
@@ -64,15 +84,12 @@ app.get('/auth/github/callback', async (req, res) => {
 
 app.get('/auth/google', (req, res) => {
   const redirect_uri = `${process.env.BASE_URL}/auth/google/callback`;
-
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${redirect_uri}&response_type=code&scope=profile email`;
-
   res.redirect(url);
 });
 
 app.get('/auth/google/callback', async (req, res) => {
   const code = req.query.code;
-
   try {
     const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
       client_id: process.env.GOOGLE_CLIENT_ID,
@@ -83,13 +100,11 @@ app.get('/auth/google/callback', async (req, res) => {
     });
 
     const access_token = tokenRes.data.access_token;
-
     const userRes = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
     req.session.user = userRes.data;
-
     res.redirect('/dashboard.html');
   } catch (err) {
     res.send('Google Auth Failed');
@@ -115,14 +130,14 @@ app.get('/api/user', (req, res) => {
 app.post('/auth/signup', (req, res) => {
   const { fname, lname, email, pw } = req.body;
   if (!email || !pw || !fname || !lname) return res.status(400).json({ error: 'Missing fields' });
-  
+
   if (users.find(u => u.email === email)) {
     return res.status(400).json({ error: 'User already exists' });
   }
 
   const newUser = { id: Date.now(), name: `${fname} ${lname}`, email, password: pw };
   users.push(newUser);
-  
+
   req.session.user = { id: newUser.id, name: newUser.name, email: newUser.email };
   res.json({ success: true, user: req.session.user });
 });
@@ -150,5 +165,5 @@ app.get('/logout', (req, res) => {
 });
 
 app.listen(process.env.PORT || 5000, () => {
-  console.log(`Server running on http://localhost:${process.env.PORT}`);
-});         
+  console.log(`Server running on port ${process.env.PORT || 5000}`);
+});

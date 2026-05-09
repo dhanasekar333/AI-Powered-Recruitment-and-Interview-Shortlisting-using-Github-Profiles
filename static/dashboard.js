@@ -4,10 +4,6 @@
 
 const $ = (id) => document.getElementById(id);
 
-// ================= CONFIG =================
-// Replace with your actual n8n webhook URL
-const N8N_WEBHOOK_URL = 'https://n8nworkflows.dpdns.org/webhook/fe2bd0c0-0402-4d6a-a3af-516996c86f53';
-
 // ================= AUTH CHECK =================
 async function checkAuth() {
   try {
@@ -19,22 +15,30 @@ async function checkAuth() {
 }
 checkAuth();
 
-// ================= JOB DATA =================
-let jobs = [
-  {
-    initials: 'S',
-    bg: 'rgba(34,197,94,0.15)',
-    color: '#22c55e',
-    title: 'Senior React Developer',
-    role: 'Frontend Engineer',
-    desc: '3+ years React, Next.js, REST APIs experience required.',
-    loc: 'Remote',
-    type: 'Full-time',
-    analyzed: 0,
-    skills: ['React', 'Next.js', 'REST APIs']
-  }
-];
+// ================= JOB PERSISTENCE (localStorage) =================
+const JOBS_KEY = 'gitrecruit_jobs';
 
+const DEFAULT_JOBS = []; // Start empty — user creates their own
+
+function loadJobs() {
+  try {
+    const saved = localStorage.getItem(JOBS_KEY);
+    return saved ? JSON.parse(saved) : DEFAULT_JOBS;
+  } catch {
+    return DEFAULT_JOBS;
+  }
+}
+
+function saveJobs() {
+  try {
+    localStorage.setItem(JOBS_KEY, JSON.stringify(jobs));
+  } catch (e) {
+    console.warn('Could not save jobs to localStorage:', e);
+  }
+}
+
+// ================= JOB DATA =================
+let jobs = loadJobs();
 let currentJobIndex = null;
 
 // ================= RENDER JOBS =================
@@ -42,45 +46,60 @@ function renderJobs() {
   const container = $('jobsList');
   if (!container) return;
 
-  container.innerHTML = jobs.map((j, i) => `
-    <div class="jd-card">
-      <div class="jd-card-content" onclick="openDetail(${i})">
-        <div class="jd-title">${j.title}</div>
-        <div class="jd-role">${j.role}</div>
-        <div class="jd-location">${j.loc}</div>
+  if (jobs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">💼</div>
+        <div class="empty-title">No jobs yet</div>
+        <div class="empty-sub">Click "+ New Job" to create your first listing</div>
+      </div>`;
+  } else {
+    container.innerHTML = jobs.map((j, i) => `
+      <div class="jd-card">
+        <div class="jd-card-content" onclick="openDetail(${i})">
+          <div class="jd-title">${j.title}</div>
+          <div class="jd-role">${j.role}</div>
+          <div class="jd-location">${j.loc}</div>
+        </div>
+        <div class="jd-card-actions">
+          <button class="btn-search-candidates" onclick="searchCandidates(${i})" title="Search Candidates">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search Candidates
+          </button>
+          <button class="jd-delete-btn" onclick="deleteJobFromCard(${i})" title="Delete Job">
+            <svg viewBox="0 0 24 24">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </button>
+        </div>
       </div>
-      <div class="jd-card-actions">
-        <button class="btn-search-candidates" onclick="searchCandidates(${i})" title="Search Candidates">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          Search Candidates
-        </button>
-        <button class="jd-delete-btn" onclick="deleteJobFromCard(${i})" title="Delete Job">
-          <svg viewBox="0 0 24 24">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
   $('pos-count').textContent = jobs.length;
   $('s-jobs').textContent = jobs.length;
+  updateStats();
 }
 
 renderJobs();
 
-// ================= SEARCH CANDIDATES (hits n8n) =================
+// ================= SEARCH CANDIDATES — proxied through backend =================
 window.searchCandidates = async function(i) {
   const job = jobs[i];
 
-  // Build query from role
+  // Build query from role title
   const queryMap = {
-    'react': 'react developer',
-    'next':  'nextjs developer',
-    'python': 'python developer',
-    'node':  'nodejs developer',
-    'java':  'java developer',
+    'react':   'react developer',
+    'next':    'nextjs developer',
+    'python':  'python developer',
+    'node':    'nodejs developer',
+    'java':    'java developer',
+    'angular': 'angular developer',
+    'vue':     'vue developer',
+    'flutter': 'flutter developer',
+    'golang':  'golang developer',
+    'rust':    'rust developer',
   };
   const roleLower = job.role.toLowerCase();
   let job_query = 'developer';
@@ -88,11 +107,12 @@ window.searchCandidates = async function(i) {
     if (roleLower.includes(key)) { job_query = val; break; }
   }
 
-  // Show results panel with loading state
+  // Show loading panel
   showResultsPanel(job, null, true);
 
   try {
-    const res = await fetch(N8N_WEBHOOK_URL, {
+    // ✅ Calls backend proxy — avoids CORS issues with direct n8n calls
+    const res = await fetch('/api/search-candidates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -104,34 +124,36 @@ window.searchCandidates = async function(i) {
       })
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${res.status}`);
+    }
 
     const raw = await res.json();
 
-    // Parse n8n output — handle both wrapped and unwrapped formats
+    // Parse n8n output — handles both string and object formats
     let data = raw;
     if (raw.output && typeof raw.output === 'string') {
-      data = JSON.parse(raw.output);
+      try { data = JSON.parse(raw.output); } catch { data = raw; }
     } else if (raw.output && typeof raw.output === 'object') {
       data = raw.output;
     }
 
-    // Update job analyzed count
+    // Update job analyzed count and save
     jobs[i].analyzed = data.top_candidates?.length || 0;
+    saveJobs();
     renderJobs();
-    updateStats();
 
     showResultsPanel(job, data, false);
 
   } catch (err) {
     showResultsPanel(job, null, false, err.message);
-    showToast('Failed to fetch candidates. Check n8n connection.');
+    showToast('Failed to fetch candidates: ' + err.message);
   }
 };
 
 // ================= RESULTS PANEL =================
 function showResultsPanel(job, data, loading, error) {
-  // Remove existing panel
   const existing = document.getElementById('resultsPanel');
   if (existing) existing.remove();
 
@@ -161,22 +183,25 @@ function showResultsPanel(job, data, loading, error) {
         </div>
       </div>`;
     animateLoadingSteps();
+
   } else if (error) {
     panel.innerHTML = `
       <div class="results-modal">
         <div class="results-hdr">
-          <div class="results-title">Error</div>
+          <div class="results-title">Something went wrong</div>
           <div class="modal-x" onclick="closeResults()">✕</div>
         </div>
         <div class="error-state">
           <div class="error-icon">⚠️</div>
           <div class="error-msg">${error}</div>
+          <p style="font-size:13px;color:#64748b;margin-top:8px;">Check that your n8n workflow is active and the N8N_WEBHOOK_URL is set in Render.</p>
           <button class="btn-ok" onclick="closeResults()">Close</button>
         </div>
       </div>`;
+
   } else {
     const candidates = data.top_candidates || [];
-    const role = data.role || job.title;
+    const role  = data.role || job.title;
     const total = data.total_candidates_evaluated || 0;
 
     panel.innerHTML = `
@@ -199,7 +224,7 @@ function showResultsPanel(job, data, loading, error) {
             <span class="rsb-label">Evaluated</span>
           </div>
           <div class="rsb-item">
-            <span class="rsb-val">${candidates[0]?.final_score?.toFixed(1) || 0}</span>
+            <span class="rsb-val">${candidates[0]?.final_score?.toFixed(1) || '—'}</span>
             <span class="rsb-label">Top Score</span>
           </div>
           <div class="rsb-item">
@@ -209,7 +234,10 @@ function showResultsPanel(job, data, loading, error) {
         </div>
 
         <div class="candidates-list">
-          ${candidates.map((c, idx) => renderCandidateCard(c, idx)).join('')}
+          ${candidates.length > 0
+            ? candidates.map((c, idx) => renderCandidateCard(c, idx)).join('')
+            : '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No candidates found</div><div class="empty-sub">Try adjusting the job description or role</div></div>'
+          }
         </div>
 
         <div class="results-ftr">
@@ -227,13 +255,13 @@ function showResultsPanel(job, data, loading, error) {
 
 function renderCandidateCard(c, idx) {
   const levelColor = { 'Advanced': '#22c55e', 'Intermediate': '#3b82f6', 'Beginner': '#f59e0b' };
-  const color = levelColor[c.skill_level] || '#3b82f6';
+  const color    = levelColor[c.skill_level] || '#3b82f6';
   const rankEmoji = ['🥇','🥈','🥉','4️⃣','5️⃣'][idx] || `#${c.rank}`;
-  const ghUrl = `https://github.com/${c.candidate}`;
+  const ghUrl    = `https://github.com/${c.candidate}`;
 
-  const matchBar  = Math.min(100, c.match_score || 0);
-  const codeBar   = Math.min(100, c.code_score || 0);
-  const credBar   = Math.min(100, c.credibility_score || 0);
+  const matchBar = Math.min(100, c.match_score || 0);
+  const codeBar  = Math.min(100, c.code_score || 0);
+  const credBar  = Math.min(100, c.credibility_score || 0);
 
   const skills = (c.matched_skills || []).map(s =>
     `<span class="skill-chip">${s}</span>`).join('');
@@ -248,12 +276,12 @@ function renderCandidateCard(c, idx) {
           <div class="cc-level" style="color:${color}">${c.skill_level}</div>
         </div>
         <div class="cc-final-score">
-          <div class="cfs-val">${c.final_score?.toFixed(1)}</div>
+          <div class="cfs-val">${c.final_score?.toFixed(1) ?? '—'}</div>
           <div class="cfs-label">Score</div>
         </div>
       </div>
 
-      <div class="cc-summary">${c.summary}</div>
+      <div class="cc-summary">${c.summary || ''}</div>
 
       <div class="cc-skills">${skills}</div>
 
@@ -284,8 +312,9 @@ function renderCandidateCard(c, idx) {
 }
 
 function getAvgLevel(candidates) {
+  if (!candidates.length) return '—';
   const counts = { Advanced: 0, Intermediate: 0, Beginner: 0 };
-  candidates.forEach(c => counts[c.skill_level]++);
+  candidates.forEach(c => { if (counts[c.skill_level] !== undefined) counts[c.skill_level]++; });
   if (counts.Advanced >= counts.Intermediate && counts.Advanced >= counts.Beginner) return 'Advanced';
   if (counts.Intermediate >= counts.Beginner) return 'Intermediate';
   return 'Beginner';
@@ -293,7 +322,7 @@ function getAvgLevel(candidates) {
 
 function animateLoadingSteps() {
   const steps = document.querySelectorAll('.loading-steps .step');
-  let i = 0;
+  let i = 1; // first step already active
   const interval = setInterval(() => {
     if (i < steps.length) {
       steps[i].classList.add('active');
@@ -301,7 +330,7 @@ function animateLoadingSteps() {
     } else {
       clearInterval(interval);
     }
-  }, 8000); // ~8s per step to match ~30s total pipeline
+  }, 8000);
 }
 
 window.closeResults = function() {
@@ -326,9 +355,9 @@ window.exportResults = function(data) {
 // ================= STATS =================
 function updateStats() {
   const totalAnalyzed = jobs.reduce((s, j) => s + (j.analyzed || 0), 0);
-  $('s-cand').textContent = totalAnalyzed;
-  $('s-gh').textContent   = totalAnalyzed;
-  $('s-short').textContent = jobs.length > 0 ? Math.min(5, totalAnalyzed) : 0;
+  $('s-cand').textContent  = totalAnalyzed;
+  $('s-gh').textContent    = totalAnalyzed;
+  $('s-short').textContent = totalAnalyzed > 0 ? Math.min(5, totalAnalyzed) : 0;
 }
 
 // ================= MODAL - VIEW JOB DETAILS =================
@@ -345,6 +374,7 @@ window.openDetail = function(i) {
 window.deleteJob = function() {
   if (currentJobIndex !== null) {
     jobs.splice(currentJobIndex, 1);
+    saveJobs();
     renderJobs();
     currentJobIndex = null;
     $('modal')?.classList.remove('open');
@@ -355,6 +385,7 @@ window.deleteJob = function() {
 window.deleteJobFromCard = function(i) {
   if (confirm('Delete this job listing?')) {
     jobs.splice(i, 1);
+    saveJobs();
     renderJobs();
     showToast('Job listing deleted!');
   }
@@ -389,22 +420,27 @@ window.submitNewJob = function() {
     analyzed: 0, skills: []
   });
 
+  saveJobs(); // ✅ Persist to localStorage
   renderJobs();
   $('createJobModal')?.classList.remove('open');
   showToast('Job created! Click "Search Candidates" to find matches.');
 };
 
 // ================= MODAL CLOSE =================
-const modal = $('modal');
+const modal          = $('modal');
 const createJobModal = $('createJobModal');
 
 $('closeModal')?.addEventListener('click', () => { modal?.classList.remove('open'); currentJobIndex = null; });
 $('closeModal2')?.addEventListener('click', () => { modal?.classList.remove('open'); currentJobIndex = null; });
 $('closeCreateJobModal')?.addEventListener('click', () => createJobModal?.classList.remove('open'));
-$('cancelCreateJob')?.addEventListener('click', () => createJobModal?.classList.remove('open'));
+$('cancelCreateJob')?.addEventListener('click',     () => createJobModal?.classList.remove('open'));
 
-modal?.addEventListener('click', e => { if (e.target === modal) { modal.classList.remove('open'); currentJobIndex = null; } });
-createJobModal?.addEventListener('click', e => { if (e.target === createJobModal) createJobModal.classList.remove('open'); });
+modal?.addEventListener('click', e => {
+  if (e.target === modal) { modal.classList.remove('open'); currentJobIndex = null; }
+});
+createJobModal?.addEventListener('click', e => {
+  if (e.target === createJobModal) createJobModal.classList.remove('open');
+});
 
 // ================= TOAST =================
 function showToast(message) {
