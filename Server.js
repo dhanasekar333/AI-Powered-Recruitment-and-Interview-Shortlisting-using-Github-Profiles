@@ -59,10 +59,24 @@ app.post('/api/search-candidates', async (req, res) => {
     console.log(`[${jobId}] n8n webhook acknowledged (waiting for callback)`);
   })
   .catch(err => {
+    // FIX 1: 524 means Cloudflare timed out the connection but n8n is STILL RUNNING.
+    // Do NOT set status=error — keep 'pending' so the browser keeps polling.
+    // The n8n callback will arrive at ~9 minutes and set status=done.
+    const errMsg = err.message || '';
+    const statusCode = err.response?.status || 0;
+    const is524 = statusCode === 524 || errMsg.includes('524');
+
+    if (is524) {
+      console.warn(`[${jobId}] 524 from Cloudflare — n8n is still running. Keeping status=pending so polling continues.`);
+      // Do nothing — job stays pending, n8n will callback when done
+      return;
+    }
+
+    // For genuine errors (not 524), mark as error
     if (jobStore[jobId]?.status === 'pending') {
-      console.error(`[${jobId}] n8n trigger error: ${err.message}`);
+      console.error(`[${jobId}] n8n trigger error: ${errMsg}`);
       jobStore[jobId].status = 'error';
-      jobStore[jobId].error  = `n8n workflow error: ${err.message}`;
+      jobStore[jobId].error  = `n8n workflow error: ${errMsg}`;
     }
   });
 
@@ -98,11 +112,10 @@ app.post('/api/job-result/:jobId', (req, res) => {
     }
   }
 
-  const topCandidates = parsedData.top_candidates;
+  const topCandidates  = parsedData.top_candidates;
   const totalEvaluated = parsedData.total_candidates_evaluated;
 
   if (!Array.isArray(topCandidates)) {
-    // n8n sent something but it has no candidate data — likely an early failure
     console.warn(`[${jobId}] No top_candidates array in payload. Raw:`, JSON.stringify(req.body).substring(0, 400));
     jobStore[jobId].status = 'empty';
     jobStore[jobId].data   = null;
@@ -111,8 +124,12 @@ app.post('/api/job-result/:jobId', (req, res) => {
   }
 
   console.log(`[${jobId}] Done: ${topCandidates.length} candidates (${totalEvaluated} evaluated)`);
+
+  // FIX 2: Always clear error when real results arrive (removes stale 524 error message)
   jobStore[jobId].status = 'done';
   jobStore[jobId].data   = parsedData;
+  jobStore[jobId].error  = null;
+
   res.json({ ok: true });
 });
 
